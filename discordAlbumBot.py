@@ -43,7 +43,7 @@ intents.reactions = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-POST_TIME = time(hour=20, minute=0)  # 8 PM daily
+POST_TIME = time(hour=8, minute=0)  # 8 AM daily
 RATING_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']
 
 last_posted_message_id = None
