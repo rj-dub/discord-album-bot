@@ -1,5 +1,5 @@
 # discord-album-bot
-just a fun project I wrote with for some friends.<br />
+just a fun project I wrote for some friends.<br />
 it takes a google sheets file with album names and artists and fires them into a discord channel at random once per day<br />
 you can rate them using the emojis from 1-5<br />
 it'll average out your ratings in the footer<br />
