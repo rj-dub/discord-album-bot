@@ -18,3 +18,5 @@ __pycache__/
 
 # Credentials or secret JSON files
 credentials.json
+
+.cache

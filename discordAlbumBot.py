@@ -8,6 +8,9 @@ from datetime import datetime, time, timedelta
 import asyncio
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+from unidecode import unidecode
 
 load_dotenv()
 
@@ -17,6 +20,9 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+
 # Parse Google credentials JSON string into a dict
 google_creds = json.loads(GOOGLE_CREDENTIALS_JSON)
 
@@ -24,110 +30,119 @@ google_creds = json.loads(GOOGLE_CREDENTIALS_JSON)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(google_creds, scope)
 gc = gspread.authorize(creds)
-sheet = gc.open(SHEET_NAME).sheet1  # Using the first sheet
+sheet = gc.open(SHEET_NAME).sheet1  # Using the first sheet with headers on the first row
 
-POSTED_FILE = 'posted_albums.json'
-
-def load_posted():
-    if os.path.exists(POSTED_FILE):
-        with open(POSTED_FILE, 'r') as f:
-            return set(json.load(f))
-    return set()
-
-def save_posted(posted_set):
-    with open(POSTED_FILE, 'w') as f:
-        json.dump(list(posted_set), f)
-
-posted_albums = load_posted()
+# Setup Spotify client
+spotify_auth_manager = SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
+sp = spotipy.Spotify(auth_manager=spotify_auth_manager)
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.messages = True  # needed to get reaction events
+intents.messages = True
+intents.reactions = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-# Ensure the bot has the necessary permissions to read messages and add reactions
 
-# The time to post each day (24h format)
-POST_TIME = time(hour=20, minute=0)  # 8:00 PM daily
-
-# Emoji for ratings 1 to 5
+POST_TIME = time(hour=20, minute=0)  # 8 PM daily
 RATING_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']
 
-# Store message ID of last posted album to track ratings
 last_posted_message_id = None
-
-# Store album info to keep track of ratings per album/message
-# Key: message_id, Value: {'album': album_name, 'ratings': {user_id: rating_int}}
 ratings_store = {}
 
-def get_unposted_album(records):
-    unposted = [album for album in records if album.get('Spotify Link') not in posted_albums]
-    if not unposted:
-        return None
-    album = random.choice(unposted)
-    posted_albums.add(album.get('Spotify Link'))
-    save_posted(posted_albums)
-    return album
+# File to store played albums so we don't repeat
+PLAYED_FILE = "played_albums.json"
+
+def load_played_albums():
+    if os.path.exists(PLAYED_FILE):
+        with open(PLAYED_FILE, 'r') as f:
+            return set(json.load(f))
+    return set()
+
+def save_played_albums(played):
+    with open(PLAYED_FILE, 'w') as f:
+        json.dump(list(played), f)
+
+played_albums = load_played_albums()
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user}!')
-    daily_album_poster.start()  # Start the daily posting task
+    print(f"Logged in as {bot.user}!")
+    daily_album_poster.start()
 
 async def post_random_album():
-    global last_posted_message_id
-    global ratings_store
+    global last_posted_message_id, ratings_store, played_albums
 
     channel = bot.get_channel(CHANNEL_ID)
     if channel is None:
         print("Could not find the channel. Check CHANNEL_ID.")
         return
 
-    # Fetch all rows from sheet (assuming columns: Album Name, Spotify Link)
-    records = sheet.get_all_records()
+    records = sheet.get_all_records(head=2)
+
+
     if not records:
         print("No albums found in the Google Sheet.")
         return
 
-    album = get_unposted_album(records)
-    if album is None:
-        # All albums posted, reset posted list and pick again
-        posted_albums.clear()
-        save_posted(posted_albums)
-        album = get_unposted_album(records)
-        if album is None:
-            print("No albums found after reset, exiting post.")
-            return
+    # Filter out albums already played
+    available_albums = [r for r in records if r.get('Album') and r.get('Artist') and r['Album'] not in played_albums]
 
-    album_name = album.get('Album Name') or album.get('Album') or album.get('Name')
-    spotify_link = album.get('Spotify Link') or album.get('Link') or album.get('URL')
+    if not available_albums:
+        # Reset if all played
+        print("All albums have been posted. Resetting played albums list.")
+        played_albums.clear()
+        save_played_albums(played_albums)
+        available_albums = [r for r in records if r.get('Album') and r.get('Artist')]
 
-    if not album_name or not spotify_link:
-        print("Album or Spotify link missing in the sheet row.")
+    album = random.choice(available_albums)
+    album_name = album['Album']
+    artist_name = album['Artist']
+
+    # Spotify API search
+    album_cover_url = None
+    spotify_link = None
+    try:
+        results = sp.search(q=f"album:{unidecode(album_name)} artist:{unidecode(artist_name)}", type='album', limit=1)
+        albums = results.get('albums', {}).get('items', [])
+        if albums:
+            album_data = albums[0]
+            album_cover_url = album_data['images'][0]['url'] if album_data['images'] else None
+            spotify_link = album_data['external_urls']['spotify']
+    except Exception as e:
+        print(f"Spotify search error: {e}")
+
+    if not spotify_link:
+        print(f"Could not find Spotify link for album: {album_name} by {artist_name}")
         return
 
-    # Compose message
-    embed = discord.Embed(title=album_name, url=spotify_link, description="React with 1️⃣ to 5️⃣ to rate this album!")
+    embed = discord.Embed(
+        title=f"{album_name} — {artist_name}",
+        url=spotify_link,
+        description="React with 1️⃣ to 5️⃣ to rate this album!"
+    )
+    if album_cover_url:
+        embed.set_thumbnail(url=album_cover_url)
     embed.set_footer(text="Ratings will be averaged automatically.")
 
     message = await channel.send(embed=embed)
 
-    # Add reaction emojis for rating
     for emoji in RATING_EMOJIS:
         await message.add_reaction(emoji)
 
-    # Save message ID and reset ratings
     last_posted_message_id = message.id
     ratings_store[last_posted_message_id] = {
         'album': album_name,
         'ratings': {}
     }
 
+    # Mark album as played and save
+    played_albums.add(album_name)
+    save_played_albums(played_albums)
+
 @tasks.loop(minutes=1)
 async def daily_album_poster():
     now = datetime.now()
     target = datetime.combine(now.date(), POST_TIME)
-
     if now > target:
         target += timedelta(days=1)
 
@@ -147,19 +162,18 @@ async def on_reaction_remove(reaction, user):
 
 async def handle_reaction_change(reaction, user, added: bool):
     if user.bot:
-        return  # Ignore bot reactions
+        return
 
     message = reaction.message
     if message.id != last_posted_message_id:
-        return  # Only handle reactions on the latest album post
+        return
 
     emoji = reaction.emoji
     if emoji not in RATING_EMOJIS:
-        return  # Ignore other emojis
+        return
 
     rating = RATING_EMOJIS.index(emoji) + 1
 
-    # Update the stored ratings
     album_rating_data = ratings_store.get(message.id)
     if album_rating_data is None:
         return
@@ -169,11 +183,9 @@ async def handle_reaction_change(reaction, user, added: bool):
     if added:
         user_ratings[user.id] = rating
     else:
-        # Reaction removed, remove user's rating if it matches
         if user.id in user_ratings and user_ratings[user.id] == rating:
             del user_ratings[user.id]
 
-    # Calculate average rating
     if user_ratings:
         average = sum(user_ratings.values()) / len(user_ratings)
         average = round(average, 2)
@@ -182,7 +194,6 @@ async def handle_reaction_change(reaction, user, added: bool):
     else:
         new_footer = "No ratings yet. React with 1️⃣ to 5️⃣ to rate!"
 
-    # Update embed footer with average rating
     embed = message.embeds[0]
     embed.set_footer(text=new_footer)
     await message.edit(embed=embed)
