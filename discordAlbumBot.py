@@ -79,30 +79,39 @@ async def post_random_album():
 
     records = sheet.get_all_records(head=2)
 
-
     if not records:
         print("No albums found in the Google Sheet.")
         return
 
     # Filter out albums already played
-    available_albums = [r for r in records if r.get('Album') and r.get('Artist') and r['Album'] not in played_albums]
+    available_albums = [
+        r for r in records
+        if r.get('Album') and r.get('Artist') and r['Album'] not in played_albums
+    ]
 
     if not available_albums:
         # Reset if all played
         print("All albums have been posted. Resetting played albums list.")
         played_albums.clear()
         save_played_albums(played_albums)
-        available_albums = [r for r in records if r.get('Album') and r.get('Artist')]
+        available_albums = [
+            r for r in records if r.get('Album') and r.get('Artist')
+        ]
 
     album = random.choice(available_albums)
     album_name = album['Album']
     artist_name = album['Artist']
+    suggester_name = album.get('Suggester') or "Unknown"
 
     # Spotify API search
     album_cover_url = None
     spotify_link = None
     try:
-        results = sp.search(q=f"album:{unidecode(album_name)} artist:{unidecode(artist_name)}", type='album', limit=1)
+        results = sp.search(
+            q=f"album:{unidecode(album_name)} artist:{unidecode(artist_name)}",
+            type='album',
+            limit=1
+        )
         albums = results.get('albums', {}).get('items', [])
         if albums:
             album_data = albums[0]
@@ -118,7 +127,7 @@ async def post_random_album():
     embed = discord.Embed(
         title=f"{album_name} — {artist_name}",
         url=spotify_link,
-        description="React with 1️⃣ to 5️⃣ to rate this album!"
+        description=f"💡 Suggested by: **{suggester_name}**\n\nReact with 1️⃣ to 5️⃣ to rate this album!"
     )
     if album_cover_url:
         embed.set_thumbnail(url=album_cover_url)
@@ -138,6 +147,7 @@ async def post_random_album():
     # Mark album as played and save
     played_albums.add(album_name)
     save_played_albums(played_albums)
+
 
 @tasks.loop(minutes=1)
 async def daily_album_poster():
