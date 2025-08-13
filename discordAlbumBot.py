@@ -285,6 +285,12 @@ async def play_album(ctx, *, album_name: str):
     except Exception as e:
         await ctx.send(f"⚠️ Error searching for `{album_name}`: `{e}`")
 
+@bot.command(name="test")
+async def test_album(ctx):
+    """Manually trigger an album suggestion."""
+    await post_random_album()
+    await ctx.send("✅ Posted a random album suggestion.")
+
 @bot.event
 async def on_reaction_add(reaction, user):
     await handle_reaction_change(reaction, user, added=True)
