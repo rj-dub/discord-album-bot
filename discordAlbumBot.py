@@ -44,7 +44,7 @@ intents.reactions = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 POST_TIME = time(hour=8, minute=0)  # 8 AM daily
-RATING_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']
+RATING_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
 
 last_posted_message_id = None
 ratings_store = {}
@@ -67,7 +67,8 @@ played_albums = load_played_albums()
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}!")
-    daily_album_poster.start()
+    if not daily_album_poster.is_running():
+        daily_album_poster.start()
 
 async def post_random_album():
     global last_posted_message_id, ratings_store, played_albums
@@ -99,9 +100,9 @@ async def post_random_album():
         ]
 
     album = random.choice(available_albums)
-    album_name = album['Album']
-    artist_name = album['Artist']
-    suggester_name = album.get('Suggester') or "Unknown"
+    album_name = str(album['Album'])
+    artist_name = str(album['Artist'])
+    suggester_name = str(album.get('Suggester') or "Unknown")
 
     # Spotify API search
     album_cover_url = None
@@ -127,7 +128,7 @@ async def post_random_album():
     embed = discord.Embed(
         title=f"{album_name} — {artist_name}",
         url=spotify_link,
-        description=f"💡 Suggested by: **{suggester_name}**\n\nReact with 1️⃣ to 5️⃣ to rate this album!"
+        description=f"💡 Suggested by: **{suggester_name}**\n\nReact with 1️⃣ to 🔟 to rate this album!"
     )
     if album_cover_url:
         embed.set_thumbnail(url=album_cover_url)
@@ -148,7 +149,6 @@ async def post_random_album():
     played_albums.add(album_name)
     save_played_albums(played_albums)
 
-
 @tasks.loop(minutes=1)
 async def daily_album_poster():
     now = datetime.now()
@@ -156,11 +156,19 @@ async def daily_album_poster():
     if now > target:
         target += timedelta(days=1)
 
-    wait_seconds = (target - now).total_seconds()
+    wait_seconds = 1
     print(f"Waiting {wait_seconds:.0f} seconds until next post.")
     await asyncio.sleep(wait_seconds)
 
     await post_random_album()
+
+@daily_album_poster.error
+async def daily_album_poster_error(error):
+    print(f"⚠️ daily_album_poster encountered an error: {error}")
+    await asyncio.sleep(10)  # wait a bit before retry
+    if not daily_album_poster.is_running():
+        print("🔄 Restarting daily_album_poster...")
+        daily_album_poster.start()
 
 @bot.event
 async def on_reaction_add(reaction, user):
@@ -202,7 +210,7 @@ async def handle_reaction_change(reaction, user, added: bool):
         rating_count = len(user_ratings)
         new_footer = f"Average rating: {average} ⭐️ from {rating_count} votes."
     else:
-        new_footer = "No ratings yet. React with 1️⃣ to 5️⃣ to rate!"
+        new_footer = "No ratings yet. React with 1️⃣ to 🔟 to rate!"
 
     embed = message.embeds[0]
     embed.set_footer(text=new_footer)
