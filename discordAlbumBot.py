@@ -170,6 +170,41 @@ async def daily_album_poster_error(error):
         print("🔄 Restarting daily_album_poster...")
         daily_album_poster.start()
 
+@bot.command(name="play")
+async def play_album(ctx, *, album_name: str):
+    """Test Spotify search for a given album."""
+    try:
+        # Force album_name to string and strip extra spaces
+        album_name = str(album_name).strip()
+
+        results = sp.search(
+            q=f"album:{unidecode(album_name)}",
+            type='album',
+            limit=1
+        )
+
+        albums = results.get('albums', {}).get('items', [])
+        if not albums:
+            await ctx.send(f"❌ Could not find an album called `{album_name}` on Spotify.")
+            return
+
+        album_data = albums[0]
+        artist_name = album_data['artists'][0]['name']
+        spotify_link = album_data['external_urls']['spotify']
+        album_cover_url = album_data['images'][0]['url'] if album_data['images'] else None
+
+        embed = discord.Embed(
+            title=f"{album_data['name']} — {artist_name}",
+            url=spotify_link
+        )
+        if album_cover_url:
+            embed.set_thumbnail(url=album_cover_url)
+
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"⚠️ Error searching for `{album_name}`: `{e}`")
+
 @bot.event
 async def on_reaction_add(reaction, user):
     await handle_reaction_change(reaction, user, added=True)
