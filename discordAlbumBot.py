@@ -84,6 +84,86 @@ async def post_random_album():
         print("No albums found in the Google Sheet.")
         return
 
+    available_albums = [
+        r for r in records
+        if r.get('Album') and r.get('Artist') and r['Album'] not in played_albums
+    ]
+
+    if not available_albums:
+        print("All albums have been posted. Resetting played albums list.")
+        played_albums.clear()
+        save_played_albums(played_albums)
+        available_albums = [
+            r for r in records if r.get('Album') and r.get('Artist')
+        ]
+
+    album = random.choice(available_albums)
+    album_name = album['Album']
+    artist_name = album['Artist']
+    suggester_name = album.get('Suggester') or "Unknown"
+
+    album_cover_url = None
+    spotify_link = None
+
+    try:
+        results = sp.search(
+            q=f"album:{unidecode(album_name)} artist:{unidecode(artist_name)}",
+            type='album',
+            limit=1
+        )
+        albums = results.get('albums', {}).get('items', [])
+        if albums:
+            album_data = albums[0]
+            album_cover_url = album_data['images'][0]['url'] if album_data['images'] else None
+            spotify_link = album_data['external_urls']['spotify']
+    except Exception as e:
+        print(f"Spotify search error for {album_name} by {artist_name}: {e}")
+
+    # Build embed — if no Spotify data, show without link/cover
+    if spotify_link:
+        embed = discord.Embed(
+            title=f"{album_name} — {artist_name}",
+            url=spotify_link,
+            description=f"💡 Suggested by: **{suggester_name}**\n\nReact with 1️⃣ to 🔟 to rate this album!"
+        )
+    else:
+        embed = discord.Embed(
+            title=f"{album_name} — {artist_name}",
+            description=f"💡 Suggested by: **{suggester_name}**\n\n(Spotify link not found)\n\nReact with 1️⃣ to 🔟 to rate this album!"
+        )
+
+    if album_cover_url:
+        embed.set_thumbnail(url=album_cover_url)
+
+    embed.set_footer(text="Ratings will be averaged automatically.")
+
+    message = await channel.send(embed=embed)
+
+    for emoji in RATING_EMOJIS:
+        await message.add_reaction(emoji)
+
+    last_posted_message_id = message.id
+    ratings_store[last_posted_message_id] = {
+        'album': album_name,
+        'ratings': {}
+    }
+
+    played_albums.add(album_name)
+    save_played_albums(played_albums)
+
+    global last_posted_message_id, ratings_store, played_albums
+
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel is None:
+        print("Could not find the channel. Check CHANNEL_ID.")
+        return
+
+    records = sheet.get_all_records(head=2)
+
+    if not records:
+        print("No albums found in the Google Sheet.")
+        return
+
     # Filter out albums already played
     available_albums = [
         r for r in records
