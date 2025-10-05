@@ -133,7 +133,7 @@ async def daily_album_poster():
     target = datetime.combine(now.date(), POST_TIME)
     if now > target:
         target += timedelta(days=1)
-    wait_seconds = 10
+    wait_seconds = (target - now).total_seconds()
     print(f"Waiting {wait_seconds:.0f} seconds until next post.")
     await asyncio.sleep(wait_seconds)
     await post_random_album()
